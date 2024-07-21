@@ -9,7 +9,7 @@ My goal is to make them pretty small. The current sizes are:
 | File                 | Size in bytes |
 | -------------------- | ------------- |
 | `hello.elf`          | 112           |
-| `hello-no-hacks.elf` | 157           |
+| `hello-no-hacks.elf` | 152           |
 
 The ELF files are generated using the [`gen_msg_elf.py`](./gen_msg_elf.py)
 script. It generates an ELF executable that prints a message of your choice.

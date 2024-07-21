@@ -1,14 +1,14 @@
 global _start
 _start:
 
-mov  ax, 1   ; write syscall
-mov  di, ax  ; write to stdout
+mov  al, 1   ; write syscall
+mov dil, al  ; write to stdout
 mov esi, msg ; write from msg buffer
-mov  dx, 14  ; write 14 bytes from msg buffer
+mov  dl, 14  ; write 14 bytes from msg buffer
 syscall
 ; We use the smallest registers possible to reduce instruction sizes.
 
-mov  ax, di  ; exit syscall using 32-bit number = 1. di==1 from earlier
+mov  al, 1   ; exit syscall using 32-bit number = 1. di==1 from earlier
 int 0x80
 ; Using the 64-bit "syscall" instruction would require rax==60 which would
 ; require a larger instruction. Additionally, 32-bit uses ebx for the exit

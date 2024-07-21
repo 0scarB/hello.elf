@@ -23,13 +23,6 @@ def gen_msg_elf(file_path: str, msg: str, *, hacks: bool):
             bytes_.append(num & 0xFF)
             num >>= 8
 
-    def set_x86_64_next_instructions_jmp_in_last_byte(instructions: list[int]):
-        # Calculted negative jump distance using Two's Complement on a single byte
-        jmp_dist = len(bytes_) + len(instructions) - x86_64_next_instructions_jmp_offset
-        jmp_dist = (~jmp_dist    ) & 0xFF
-        jmp_dist = ( jmp_dist + 1) & 0xFF
-        instructions[-1] = jmp_dist
-
     PASSES = 2
     for _ in range(PASSES):
         bytes_.clear()
@@ -53,22 +46,25 @@ def gen_msg_elf(file_path: str, msg: str, *, hacks: bool):
         ABI_SYSTEM_V = 0
         bytes_.append(ABI_SYSTEM_V)
 
-        ABI_VERSION_UNSPECIFIED = 0
-        bytes_.append(ABI_VERSION_UNSPECIFIED)
-
-        # Hack: Put the last 7 x86-64 instructions in the ELF Header's padding
-        padding_bytes_n = 7
+        # Hack: Put the last 8 x86-64 instructions in the ELF Header's abi version
+        #       field and padding
+        abi_version_bytes_n = 1
+        padding_bytes_n     = 7
         if hacks:
             x86_64_next_instructions_jmp_offset = len(bytes_)
             x86_64_instructions_end = [
-                0x0f, 0x05,       # syscall
+                0xb2, len(msg), # mov  dl, <msg length>
+                0x0f, 0x05,     # syscall
 
-                0x66, 0x89, 0xf8, # mov  ax, di
-                0xcd, 0x80,       # int 0x80
+                0xb0, 0x01,     # mov  al, 1
+                0xcd, 0x80,     # int 0x80
             ]
-            assert len(x86_64_instructions_end) == padding_bytes_n
+            assert len(x86_64_instructions_end) == abi_version_bytes_n + padding_bytes_n
             bytes_ += x86_64_instructions_end
         else:
+            ABI_VERSION_UNSPECIFIED = 0
+            bytes_.append(ABI_VERSION_UNSPECIFIED)
+
             add_n_byte_num(padding_bytes_n, 0)
 
         EXECUTABLE_FILE_TYPE = 2
@@ -153,7 +149,7 @@ def gen_msg_elf(file_path: str, msg: str, *, hacks: bool):
         virtual_mem_address = BASE_MEM_ADDRESS + prog_entry_offset
         add_n_byte_num(8, virtual_mem_address)
 
-        # Hack: Put some x86-64 instructions inside fields for the segments
+        # Hack: Put initial x86-64 instructions inside fields for the segments
         #       physical size and file size.
         #       The physical size is ignored so that's fine.
         #       The file size needs to be greater than the number of initial
@@ -163,20 +159,27 @@ def gen_msg_elf(file_path: str, msg: str, *, hacks: bool):
         if hacks:
             prog_entry_offset = len(bytes_)
 
-            x86_64_instructions_continuation = [
-                0x66, 0xb8, 0x01, 0x00,     # mov  ax, 1
-                0x66, 0x89, 0xc7,           # mov  di, ax
-                0x66, 0xba, len(msg), 0x00, # mov  dx, <msg length>
+            x86_64_instructions = [
+                0xb0, 0x01,                   # mov  al,1
+                0x40, 0x88, 0xc7,             # mov  al, dil
+                0xbe,                         # mov esi, <msg_address>
+                    (msg_address>> 0) & 0xFF, #                .
+                    (msg_address>> 8) & 0xFF, #                .
+                    (msg_address>>16) & 0xFF, #                .
+                    (msg_address>>24) & 0xFF, #                .
 
                 0xeb, -1                    # jmp <next instructions>
             ]
-            set_x86_64_next_instructions_jmp_in_last_byte(x86_64_instructions_continuation)
-            x86_64_next_instructions_jmp_offset = len(bytes_)
-            bytes_ += x86_64_instructions_continuation
+            bytes_ += x86_64_instructions
+
+            jmp_dist = len(bytes_) - x86_64_next_instructions_jmp_offset
+            jmp_dist = (~jmp_dist    ) & 0xFF
+            jmp_dist = ( jmp_dist + 1) & 0xFF
+            bytes_[-1] = jmp_dist
 
             bytes_ += [0]*(
                 physical_mem_address_bytes_n + segment_size_in_file_bytes_n
-                - len(x86_64_instructions_continuation))
+                - len(x86_64_instructions))
         else:
             physical_mem_address = BASE_MEM_ADDRESS + prog_entry_offset
             add_n_byte_num(physical_mem_address_bytes_n, physical_mem_address)
@@ -189,28 +192,8 @@ def gen_msg_elf(file_path: str, msg: str, *, hacks: bool):
         segment_size_in_mem_bytes  = segment_size_in_file_bytes
         bytes_ += segment_size_in_mem_bytes
 
-        # Hack: Put the initial x86-64 instructions in the segment alignment field.
-        #       The aligment field is not used by this program
-        alignment_bytes_n = 8
-        if hacks:
-            prog_entry_offset = len(bytes_)
-
-            x86_64_instructions = [
-                0xbe,                         # mov esi, <msg_address>
-                    (msg_address>> 0) & 0xFF, #                .
-                    (msg_address>> 8) & 0xFF, #                .
-                    (msg_address>>16) & 0xFF, #                .
-                    (msg_address>>24) & 0xFF, #                .
-
-                0xeb, -1,                     # jmp <next instructions>
-            ]
-            set_x86_64_next_instructions_jmp_in_last_byte(x86_64_instructions)
-            bytes_ += x86_64_instructions
-
-            bytes_ += [0]*(alignment_bytes_n - len(x86_64_instructions))
-        else:
-            NO_ALIGNMENT = 0
-            add_n_byte_num(alignment_bytes_n, NO_ALIGNMENT)
+        NO_ALIGNMENT = 0
+        add_n_byte_num(8, NO_ALIGNMENT)
 
         #
         # Bytes after headers
@@ -220,17 +203,17 @@ def gen_msg_elf(file_path: str, msg: str, *, hacks: bool):
             prog_entry_offset = len(bytes_)
 
             x86_64_instructions = [
-                0x66, 0xb8, 0x01, 0x00,       # mov  ax, 1
-                0x66, 0x89, 0xc7,             # mov  di, ax
+                0xb0, 0x01,                   # mov  al,1
+                0x40, 0x88, 0xc7,             # mov  al, dil
                 0xbe,                         # mov esi, <msg_address>
                     (msg_address>> 0) & 0xFF, #                .
                     (msg_address>> 8) & 0xFF, #                .
                     (msg_address>>16) & 0xFF, #                .
                     (msg_address>>24) & 0xFF, #                .
-                0x66, 0xba, len(msg), 0x00,   # mov  dx, <msg length>
+                0xb2, len(msg),               # mov  dl, <msg length>
                 0x0f, 0x05,                   # syscall
 
-                0x66, 0x89, 0xf8,             # mov  ax, di
+                0xb0, 0x01,                   # mov  al, 1
                 0xcd, 0x80,                   # int 0x80
             ]
             bytes_ += x86_64_instructions
