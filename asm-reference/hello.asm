@@ -8,7 +8,6 @@ mov  dx, 14  ; write 14 bytes from msg buffer
 syscall
 ; We use the smallest registers possible to reduce instruction sizes.
 
-label:
 mov  ax, di  ; exit syscall using 32-bit number = 1. di==1 from earlier
 int 0x80
 ; Using the 64-bit "syscall" instruction would require rax==60 which would
@@ -17,7 +16,6 @@ int 0x80
 ; meaning that we will likely get a 0 exit code with having to explicitly
 ; zero ebx; if we don't get exitcode==0 it's fine because we've printed
 ; the message but I have not observed that yet.
-
 
 msg db "Hello, World!", 0Ah
 
